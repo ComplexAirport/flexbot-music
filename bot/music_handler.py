@@ -11,6 +11,7 @@ from asyncio import sleep  # For music playing
 # For storing queue Data
 from collections import deque
 from pathlib import Path
+from init import OUTPUT_PATH
 
 
 def request_youtube(query: str) -> tuple[pytube.Stream | None, str | None]:  # the string is a possible error msg
@@ -45,7 +46,7 @@ class MusicHandler:
         self.bot = bot
 
         # [ tuple(voice_channel, channel_id (to play in), youtube_stream) ]
-        # Storing channel id separately as it may change
+        # Storing channel id separately as it may change if user joins different channels
         self.queue: deque[tuple[discord.ApplicationContext, int, pytube.Stream | None]] = deque()
 
         # Flags required for the __music_task
@@ -58,9 +59,9 @@ class MusicHandler:
 
     # Creates a recursive music playing task
     async def __music_task(self):
-        while len(self.queue) > 0:
-            self.__is_active = True
+        self.__is_active = True
 
+        while len(self.queue) > 0:
             # Get the first element in the queue
             channel, channel_id, yt = self.queue.popleft()
             channel_name = self.bot.get_channel(channel_id).name
@@ -72,7 +73,7 @@ class MusicHandler:
                      f'from={yt.url}\n\t'
                      f'to={yt.default_filename}')
 
-            video_path = Path(yt.download())
+            video_path = Path(yt.download(output_path=OUTPUT_PATH))
             self.__currently_playing = video_path.stem
 
             # If the voice client does not exist or isn't connected to the channel, connect
@@ -117,9 +118,18 @@ class MusicHandler:
                 log.warn(f'Temporary file not removed due to PermissionError')
                 pass
 
-        if self.__is_active:
-            await channel.send('*No song left in the queue:thumbsup:.*')
         self.__is_active = False
+
+        if self.vc:
+            # Disconnect from the last voice channel
+            log.info(f'Disconnecting from \'{self.vc.channel.name}\'...')
+            await self.vc.disconnect()
+
+            # Remove the temporary music storage folder
+            # log.info(f'Removing the temporary audio folder \'{OUTPUT_PATH}\'')
+            # Path(OUTPUT_PATH).rmdir()
+
+        await channel.send('*No song left in the queue:thumbsup:.*')
 
     async def request_music(self, ctx: discord.ApplicationContext, link: str, queue: bool):
         log.debug('Music Handler request\n\t'
