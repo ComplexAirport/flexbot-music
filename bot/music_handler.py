@@ -78,7 +78,7 @@ class MusicHandler:
 
             # If the voice client does not exist or isn't connected to the channel, connect
             if self.vc is None or not self.vc.is_connected():
-                log.info(f'Connecting to {channel_name}...')
+                log.info(f'Connecting to \'{channel_name}\'...')
                 self.vc = await self.bot.get_channel(channel_id).connect()
             # If the bot is in some channel but not the right one, disconnect then join it
             else:
@@ -106,7 +106,7 @@ class MusicHandler:
                 await sleep(1)
 
             log.info('The playing loop has finished.')
-            source.cleanup()
+
             self.vc.stop()
             # await self.vc.disconnect()
 
@@ -179,7 +179,7 @@ class MusicHandler:
     def request_set_volume(self, vol: int):
         vol /= 100
         log.debug(f'Volume change requested from={self.__volume} to={vol}')
-        if self.vc:
+        if self.vc and self.vc.source:
             self.vc.source.volume = vol
         self.__volume = vol
 
