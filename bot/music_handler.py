@@ -2,7 +2,7 @@
 # Interacting with queue, etc.
 
 import discord
-from log import log  # For debugging
+from init import log  # For debugging
 
 import pytube  # For downloading videos from YouTube
 from pytube.exceptions import RegexMatchError, AgeRestrictedError  # For YouTube error handling

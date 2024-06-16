@@ -1,8 +1,7 @@
 # This file is where the bot is created and launched
 import discord  # Python Discord API (pycord)
-from init import TOKEN, GUILD_IDS, GITHUB_LINK, DESCRIPTION  # Configs
+from init import TOKEN, GUILD_IDS, GITHUB_LINK, DESCRIPTION, log # Configs
 from music_handler import MusicHandler  # For handling music features
-from log import log  # For debugging
 
 # Specify the permissions for bot
 intents = discord.Intents(members=True, message_content=True, voice_states=True, guilds=True)
