@@ -2,9 +2,11 @@
 from json import load
 import logging
 from rich.logging import RichHandler
+import os
 
 # Load config
-with open('./config.json') as config_file:
+config_dir = os.path.join(os.path.dirname(__file__), 'config.json')
+with open(config_dir) as config_file:
     config = load(config_file)
 TOKEN = config['token']
 GUILD_IDS = config['guild_ids']
