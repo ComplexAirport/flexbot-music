@@ -7,11 +7,13 @@ from init import log  # For debugging
 import pytube  # For downloading videos from YouTube
 from pytube.exceptions import RegexMatchError, AgeRestrictedError  # For YouTube error handling
 from asyncio import sleep  # For music playing
+import time
+from enum import Enum  # For tracking music player state
 
 # For storing queue Data
 from collections import deque
 from pathlib import Path
-from init import OUTPUT_PATH
+from init import OUTPUT_PATH, LOGO_PATH
 
 
 def request_youtube(query: str) -> tuple[pytube.Stream | None, str | None]:  # the string is a possible error msg
@@ -41,6 +43,8 @@ def request_youtube(query: str) -> tuple[pytube.Stream | None, str | None]:  # t
 
 
 class MusicHandler:
+    State = Enum('State', ['EMPTY', 'PAUSED', 'PLAYING'])
+
     def __init__(self, bot: discord.Bot):
         self.vc: discord.VoiceClient | None = None
         self.bot = bot
@@ -73,6 +77,7 @@ class MusicHandler:
                      f'from={yt.url}\n\t'
                      f'to={yt.default_filename}')
 
+
             video_path = Path(yt.download(output_path=OUTPUT_PATH))
             self.__currently_playing = video_path.stem
 
@@ -90,12 +95,12 @@ class MusicHandler:
             source = discord.PCMVolumeTransformer(discord.FFmpegPCMAudio(str(video_path.resolve())),
                                                   volume=self.__volume)
 
+            log.debug(f'__curently_playing is set to {self.__currently_playing}')
+            await channel.edit(embed=self.get_queue_status(state=MusicHandler.State.PLAYING))
+
             # Play the audio from source in the voice channel
             log.info(f'Playing the audio in the channel \'{channel_name}\'...')
             self.vc.play(source, after=lambda err: log.error(err) if err else None)
-
-            # Show the current status in the chat
-            await channel.send(self.get_status_msg())
 
             # Loop which waits til the audio is over
             while self.vc.is_playing() or self.vc.is_paused():
@@ -106,18 +111,15 @@ class MusicHandler:
                 await sleep(1)
 
             log.info('The playing loop has finished.')
-
             self.vc.stop()
-            # await self.vc.disconnect()
-
             log.info(f'Removing the temporary file {video_path.resolve()} ...')
-
             try:
+                await sleep(1)  # Wait a bit before removing not to cause PermissionError
                 video_path.unlink()
             except PermissionError:
                 log.warn(f'Temporary file not removed due to PermissionError')
-                pass
 
+        self.__currently_playing = None
         self.__is_active = False
 
         if self.vc:
@@ -125,15 +127,9 @@ class MusicHandler:
             log.info(f'Disconnecting from \'{self.vc.channel.name}\'...')
             await self.vc.disconnect()
 
-            # Remove the temporary music storage folder
-            # log.info(f'Removing the temporary audio folder \'{OUTPUT_PATH}\'')
-            # Path(OUTPUT_PATH).rmdir()
-
-        await channel.send('*No song left in the queue:thumbsup:.*')
-
-    async def request_music(self, ctx: discord.ApplicationContext, link: str, queue: bool):
+    async def request_music(self, ctx: discord.ApplicationContext, link: str, add_to_queue: bool):
         log.debug('Music Handler request\n\t'
-                  f'queue={queue}\n\t'
+                  f'queue={add_to_queue}\n\t'
                   f'link={link}')
 
         yt_stream, error = request_youtube(link)
@@ -142,7 +138,7 @@ class MusicHandler:
             return await ctx.respond(error)
 
         # If music is requested in queue mode
-        if queue:
+        if add_to_queue:
             self.queue.append((ctx, ctx.author.voice.channel.id, yt_stream))
             log.info('Added request to the end of the queue')
             log.info(f'Queue size={len(self.queue)}')
@@ -161,7 +157,12 @@ class MusicHandler:
 
     def request_skip(self):
         log.debug('Skip requested')
+        if self.get_queue_size() == 1:
+            self.__currently_playing = MusicHandler.__get_song_name(self.queue[0][2])
+        else:
+            self.__currently_playing = None
         self.__request_skip = True
+        time.sleep(1)
 
     def request_pause(self):
         log.debug('Pause requested')
@@ -199,24 +200,56 @@ class MusicHandler:
         return self.__is_active
 
     def get_volume(self) -> int:
-        return self.__volume * 100
+        return int(self.__volume * 100)
 
     def currently_playing(self) -> str:
         return self.__currently_playing
 
-    def get_status_msg(self) -> str:
-        if not self.__is_active:
-            return '*Nothing to show here*'
+    # Get discord.Embed with currently playing music, queue and other information
+    # argument state
+    def get_queue_status(self, state: State | None = None) -> discord.Embed:
+        """
+        :param status: Explicitly set playing status. can be 'empty', 'playing' or 'paused' or None
+        """
+        if state is None:
+            if self.vc is None:
+                status = 'Empty'
+            elif self.vc.is_playing():
+                status = 'Playing'
+            else:
+                status = 'Paused'
+        else:
+            match state:
+                case MusicHandler.State.EMPTY:
+                    status = 'Empty'
+                case MusicHandler.State.PLAYING:
+                    status = 'Playing'
+                case MusicHandler.State.PAUSED:
+                    status = 'Paused'
 
-        full_status = '*Now playing:*\n' \
-                      f'**{self.__currently_playing}** in \'{self.vc.channel.name}\''
+        log.debug(f'now in get_queue_status, self.__curently_playing is {self.__currently_playing}')
+        embed = discord.Embed(
+            title=f'{status}, volume - {self.get_volume()}%',
+            color=discord.Colour.light_gray()
+        )
+        if self.__currently_playing:
+            embed.add_field(
+                name=f'Now playing: **{self.__currently_playing}**',
+                value=f'in _{self.vc.channel.name}_',
+                inline=False,
+            )
+        for idx, m in enumerate(self.queue):
+            song_number = idx + 1
+            song_name = MusicHandler.__get_song_name(m[2])
+            song_channel = self.bot.get_channel(m[1])
+            embed.add_field(name=f'{song_number}) {song_name}', value=f'in _{song_channel}_', inline=True)
 
-        if len(self.queue) > 0:
-            full_status += '\n*Queue:*\n'
-            for idx, m in enumerate(self.queue):
-                full_status += f'#*{idx + 1})* **{Path(m[2].default_filename).stem}** ' \
-                               f'in \'{self.bot.get_channel(m[1])}\'\n'
-        return full_status
+        return embed
 
     def get_queue_size(self) -> int:
         return len(self.queue)
+
+    @staticmethod
+    def __get_song_name(stream: pytube.Stream):
+        return Path(stream.default_filename).stem
+

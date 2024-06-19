@@ -1,8 +1,9 @@
 {
   "token": "",
-  "guild_ids": [1238200153832427591],
+  "guild_ids": [1238200153832427591, 1236942117410967594],
 
   "output_path": "./temp",
+  "logo": "https://github.com/ComplexAirport/flexbot-music/blob/master/logo.jpg",
 
   "github_link": "https://github.com/ComplexAirport/discord-bot",
   "description": "A simple discord bot which can play music and play games."

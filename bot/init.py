@@ -13,8 +13,10 @@ GUILD_IDS = config['guild_ids']
 GITHUB_LINK = config['github_link']
 DESCRIPTION = config['description']
 OUTPUT_PATH = config['output_path']
+LOGO_PATH = config['logo']
 
 # Set up logger
 log = logging.getLogger('rich')
-log.setLevel(level=logging.DEBUG)
+log.setLevel(level=logging.INFO)
 log.addHandler(RichHandler())
+
