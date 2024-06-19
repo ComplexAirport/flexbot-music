@@ -2,7 +2,7 @@
 # Interacting with queue, etc.
 
 import discord
-from init import log  # For debugging
+from init import log, setup_traceback  # For debugging
 
 import pytube  # For downloading videos from YouTube
 from pytube.exceptions import RegexMatchError, AgeRestrictedError  # For YouTube error handling
@@ -13,7 +13,13 @@ from enum import Enum  # For tracking music player state
 # For storing queue Data
 from collections import deque
 from pathlib import Path
-from init import OUTPUT_PATH, LOGO_PATH
+from init import OUTPUT_PATH
+
+# This line of code fixes AgeRestrictionError when downloading non age-restricted videos
+from pytube.innertube import _default_clients
+_default_clients["ANDROID_MUSIC"] = _default_clients["ANDROID_CREATOR"]
+
+setup_traceback()
 
 
 def request_youtube(query: str) -> tuple[pytube.Stream | None, str | None]:  # the string is a possible error msg
@@ -53,6 +59,15 @@ class MusicHandler:
         # Storing channel id separately as it may change if user joins different channels
         self.queue: deque[tuple[discord.ApplicationContext, int, pytube.Stream | None]] = deque()
 
+        """
+        List that keeps contexts of all music players.
+        The purpose of this list is to let the bot update all the music player embeds
+        in all channels when the song changes. It's also used not to let bot send music player
+        to the same channel twice (of not requested with /controls)
+        see the slash commands play and queue for above usage
+        """
+        self.music_player_contexts: list[discord.ApplicationContext] = []
+
         # Flags required for the __music_task
         self.__is_active: bool = False  # Used in methods to check whether __music_task is running
         self.__request_skip: bool = False  # Used to skip playing current song in the __music_task if set to True
@@ -77,7 +92,6 @@ class MusicHandler:
                      f'from={yt.url}\n\t'
                      f'to={yt.default_filename}')
 
-
             video_path = Path(yt.download(output_path=OUTPUT_PATH))
             self.__currently_playing = video_path.stem
 
@@ -95,8 +109,8 @@ class MusicHandler:
             source = discord.PCMVolumeTransformer(discord.FFmpegPCMAudio(str(video_path.resolve())),
                                                   volume=self.__volume)
 
-            log.debug(f'__curently_playing is set to {self.__currently_playing}')
-            await channel.edit(embed=self.get_queue_status(state=MusicHandler.State.PLAYING))
+            # Update the status of all music players, set state to playing
+            await self.update_state(MusicHandler.State.PLAYING)
 
             # Play the audio from source in the voice channel
             log.info(f'Playing the audio in the channel \'{channel_name}\'...')
@@ -121,6 +135,9 @@ class MusicHandler:
 
         self.__currently_playing = None
         self.__is_active = False
+
+        # Update the status of all music players, set state to empty (the queue is empty)
+        await self.update_state(MusicHandler.State.EMPTY)
 
         if self.vc:
             # Disconnect from the last voice channel
@@ -195,6 +212,22 @@ class MusicHandler:
             self.queue.popleft()
         self.request_skip()
 
+    def get_music_player_from_context(self, ctx: discord.ApplicationContext) -> discord.ApplicationContext:
+        """
+        If there is a music player in the channel of ctx already, it will return the context of that music player.
+        If not, it will be added to the list of music player contexts and be returned
+        """
+        player_ctx = next((c for c in self.music_player_contexts if c.channel == ctx.channel), None)
+        if player_ctx is None:
+            self.music_player_contexts.append(ctx)
+            return ctx
+        else:
+            return player_ctx
+
+    async def update_state(self, state: State | None = None):
+        for ctx in self.music_player_contexts:
+            await ctx.edit(embed=self.get_queue_status(state=state))
+
     # Information functions
     def is_active(self) -> bool:
         return self.__is_active
@@ -209,16 +242,9 @@ class MusicHandler:
     # argument state
     def get_queue_status(self, state: State | None = None) -> discord.Embed:
         """
-        :param status: Explicitly set playing status. can be 'empty', 'playing' or 'paused' or None
+        :param state: Explicitly set playing status. can be 'empty', 'playing' or 'paused' or None
         """
-        if state is None:
-            if self.vc is None:
-                status = 'Empty'
-            elif self.vc.is_playing():
-                status = 'Playing'
-            else:
-                status = 'Paused'
-        else:
+        if state is not None:
             match state:
                 case MusicHandler.State.EMPTY:
                     status = 'Empty'
@@ -226,8 +252,15 @@ class MusicHandler:
                     status = 'Playing'
                 case MusicHandler.State.PAUSED:
                     status = 'Paused'
+        elif self.vc is None or not self.__is_active:
+            status = 'Empty'
+        elif self.vc.is_playing():
+            status = 'Playing'
+        elif self.vc.is_paused():
+            status = 'Paused'
+        else:
+            status = 'Processing'
 
-        log.debug(f'now in get_queue_status, self.__curently_playing is {self.__currently_playing}')
         embed = discord.Embed(
             title=f'{status}, volume - {self.get_volume()}%',
             color=discord.Colour.light_gray()
@@ -252,4 +285,3 @@ class MusicHandler:
     @staticmethod
     def __get_song_name(stream: pytube.Stream):
         return Path(stream.default_filename).stem
-
