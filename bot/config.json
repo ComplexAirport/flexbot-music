@@ -5,6 +5,6 @@
   "output_path": "./temp",
   "logo": "https://github.com/ComplexAirport/flexbot-music/blob/master/logo.jpg",
 
-  "github_link": "https://github.com/ComplexAirport/discord-bot",
+  "help_message": "_Need help? Visit our [github page](https://github.com/ComplexAirport/flexbot-music)_",
   "description": "A simple discord bot which can play music and play games."
 }
