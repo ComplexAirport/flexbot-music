@@ -43,13 +43,3 @@ def search_youtube(query: str, result_count: int = 10):
 
     results: list[pytube.YouTube] = search.results[:result_count]
     return [(video.title, video.watch_url) for video in results]
-
-
-# Convert number (for example view count) to a human-readable format
-def human_readable_number(num: int) -> str:
-    num = float('{:.3g}'.format(num))
-    magnitude = 0
-    while abs(num) >= 1000:
-        magnitude += 1
-        num /= 1000.0
-    return '{}{}'.format('{:f}'.format(num).rstrip('0').rstrip('.'), ['', 'K', 'M', 'B', 'T'][magnitude])

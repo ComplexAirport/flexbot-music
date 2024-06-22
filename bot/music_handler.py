@@ -4,7 +4,7 @@
 import discord
 from discord.errors import NotFound
 from init import log, setup_traceback  # For debugging
-from youtube_handler import YoutubeObject, human_readable_number  # For YouTube requests
+from youtube_handler import YoutubeObject  # For YouTube requests
 
 from asyncio import sleep  # For music playing
 import time
@@ -17,6 +17,7 @@ from enum import Enum  # For tracking music player state
 
 # This line of code fixes AgeRestrictionError when downloading non age-restricted videos
 from pytube.innertube import _default_clients
+
 _default_clients["ANDROID_MUSIC"] = _default_clients["ANDROID_CREATOR"]
 
 setup_traceback()
@@ -229,6 +230,15 @@ class MusicHandler:
     def get_volume(self) -> int:
         return int(self.__volume * 100)
 
+    def get_queue_size(self) -> int:
+        return len(self.queue)
+
+    def get_voice_channel(self) -> discord.VoiceChannel | None:
+        if not self.vc:
+            return None
+        else:
+            return self.vc.channel
+
     # Get discord.Embed with currently playing music, queue and other information
     # argument state
     def get_queue_status(self, state: State | None = None) -> discord.Embed:
@@ -280,21 +290,12 @@ class MusicHandler:
 
         return embed
 
-    def get_queue_size(self) -> int:
-        return len(self.queue)
-
-    def get_voice_channel(self) -> discord.VoiceChannel | None:
-        if not self.vc:
-            return None
-        else:
-            return self.vc.channel
-
     # Generate informative string for the main song (with views, author)
     @staticmethod
     def format_main_song(song: YoutubeObject) -> tuple[str, str]:
         return (
             f'{song.youtube.title}',
-            f'**{song.youtube.author}**, **{human_readable_number(song.youtube.views)} Views**'
+            f'**{song.youtube.author}**, **{MusicHandler.readable_view_count(song.youtube.views)} Views**'
         )
 
     # Generate informative string for the song in queue
@@ -314,10 +315,20 @@ class MusicHandler:
         total_length = time.strftime(fm, gm)
         return f'{progress}/{total_length}'
 
+    # Convert number (for example view count) to a human-readable format
+    @staticmethod
+    def readable_view_count(views: int) -> str:
+        views = float('{:.3g}'.format(views))
+        magnitude = 0
+        while abs(views) >= 1000:
+            magnitude += 1
+            views /= 1000.0
+        return '{}{}'.format('{:f}'.format(views).rstrip('0').rstrip('.'), ['', 'K', 'M', 'B', 'T'][magnitude])
+
     # Checks if a user has right to manipulate music with slash commands or music player buttons
     async def check_valid_interaction(self, ctx: discord.Interaction | discord.ApplicationContext) -> bool:
         author = ctx.user if isinstance(ctx, discord.Interaction) else ctx.author
-        if not author.voice or author.voice.channel != self.vc:
+        if not author.voice or author.voice.channel != self.vc.channel:
             await ctx.respond(content=(
                 f'{ctx.user.mention}, join the voice channel '
                 f'{self.get_voice_channel().mention} to use music player'))
