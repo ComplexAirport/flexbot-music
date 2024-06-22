@@ -49,7 +49,7 @@ class MusicPlayerView(discord.ui.View):
             await interaction.edit(embed=MusicPlayerView.get_embed('There is no music to stop'))
         elif not await music_handler.check_valid_interaction(interaction):
             return
-        
+
         else:
             music_handler.request_clear()
             await interaction.edit(embed=music_handler.get_queue_status())
@@ -82,7 +82,7 @@ class MusicPlayerView(discord.ui.View):
             await interaction.edit(embed=MusicPlayerView.get_embed('There is no music to skip'))
         elif not await music_handler.check_valid_interaction(interaction):
             return
-        
+
         else:
             music_handler.request_skip()
             state = MusicHandler.State.EMPTY if music_handler.get_queue_size() == 0 else MusicHandler.State.PLAYING
@@ -94,7 +94,7 @@ class MusicPlayerView(discord.ui.View):
     async def volume_up_callback(self, _: discord.Button, interaction: discord.Interaction):
         if not await music_handler.check_valid_interaction(interaction):
             return
-        
+
         set_vol = music_handler.get_volume() + MusicPlayerView.default_volume_change
         music_handler.request_set_volume(set_vol)
         await interaction.edit(embed=music_handler.get_queue_status())
@@ -105,7 +105,7 @@ class MusicPlayerView(discord.ui.View):
     async def volume_down_callback(self, _: discord.Button, interaction: discord.Interaction):
         if not await music_handler.check_valid_interaction(interaction):
             return
-        
+
         set_vol = max(0, music_handler.get_volume() - MusicPlayerView.default_volume_change)
         music_handler.request_set_volume(set_vol)
         await interaction.edit(embed=music_handler.get_queue_status())
@@ -115,7 +115,7 @@ class MusicPlayerView(discord.ui.View):
     async def mute_unmute_callback(self, button: discord.Button, interaction: discord.Interaction):
         if not await music_handler.check_valid_interaction(interaction):
             return
-        
+
         if MusicPlayerView.__last_volume is not None:
             vol = MusicPlayerView.__last_volume if MusicPlayerView.__last_volume != 0 \
                 else MusicPlayerView.default_volume_change
@@ -183,8 +183,9 @@ async def queue(ctx: discord.ApplicationContext, link: discord.Option(str, descr
 async def skip(ctx: discord.ApplicationContext):
     if not music_handler.is_active():
         await ctx.respond(embed=MusicPlayerView.get_embed('There is no music to skip!'))
-    elif not music_handler.check_valid_interaction(ctx):
+    elif not await music_handler.check_valid_interaction(ctx):
         return
+        
     else:
         await ctx.respond(embed=MusicPlayerView.get_embed('Skipped to the next song'))
         music_handler.request_skip()
@@ -195,8 +196,9 @@ async def skip(ctx: discord.ApplicationContext):
 async def pause(ctx: discord.ApplicationContext):
     if not music_handler.is_active():
         await ctx.respond(embed=MusicPlayerView.get_embed('There is no music to pause!'))
-    elif not music_handler.check_valid_interaction(ctx):
+    elif not await music_handler.check_valid_interaction(ctx):
         return
+        
     else:
         await ctx.respond(embed=MusicPlayerView.get_embed('Paused the music'))
         music_handler.request_pause()
@@ -207,8 +209,9 @@ async def pause(ctx: discord.ApplicationContext):
 async def resume(ctx: discord.ApplicationContext):
     if not music_handler.is_active():
         await ctx.respond(embed=MusicPlayerView.get_embed('There is no paused music to resume!'))
-    elif not music_handler.check_valid_interaction(ctx):
+    elif not await music_handler.check_valid_interaction(ctx):
         return
+        
     else:
         await ctx.respond(embed=MusicPlayerView.get_embed('Resumed the music'))
         music_handler.request_resume()
@@ -219,8 +222,9 @@ async def resume(ctx: discord.ApplicationContext):
 async def clear(ctx: discord.ApplicationContext):
     if not music_handler.is_active():
         await ctx.respond(embed=MusicPlayerView.get_embed('There is no queue to clear!'))
-    elif not music_handler.check_valid_interaction(ctx):
+    elif not await music_handler.check_valid_interaction(ctx):
         return
+        
     else:
         await ctx.respond(embed=MusicPlayerView.get_embed('Cleared the queue'))
         music_handler.request_clear()
@@ -230,8 +234,9 @@ async def clear(ctx: discord.ApplicationContext):
 async def volume(ctx: discord.ApplicationContext, vol: discord.Option(int, description='in percents %')):
     if vol < 0:
         await ctx.respond(embed=MusicPlayerView.get_embed('Percentage cannot be negative!'))
-    elif not music_handler.check_valid_interaction(ctx):
+    elif not await music_handler.check_valid_interaction(ctx):
         return
+        
     else:
         await ctx.respond(embed=MusicPlayerView.get_embed(f'Set the volume to {vol}%'))
         MusicPlayerView.set_last_volume(vol)
@@ -244,8 +249,9 @@ async def jump(ctx: discord.ApplicationContext, n: discord.Option(int, descripti
     queue_size = music_handler.get_queue_size()
     if queue_size == 0:
         await ctx.respond(embed=MusicPlayerView.get_embed('There are no items in the queue!'))
-    elif not music_handler.check_valid_interaction(ctx):
+    elif not await music_handler.check_valid_interaction(ctx):
         return
+        
     elif n > queue_size:
         await ctx.respond(embed=MusicPlayerView.get_embed(f'There are only {queue_size} items in the queue!'))
     elif n <= 0:
@@ -261,8 +267,9 @@ async def remove(ctx: discord.ApplicationContext, n: discord.Option(int, descrip
     queue_size = music_handler.get_queue_size()
     if queue_size == 0:
         await ctx.respond(embed=MusicPlayerView.get_embed('There are no items in the queue!'))
-    elif not music_handler.check_valid_interaction(ctx):
+    elif not await music_handler.check_valid_interaction(ctx):
         return
+        
     elif n > queue_size:
         await ctx.respond(embed=MusicPlayerView.get_embed(f'There are only {queue_size} items in the queue!'))
     elif n <= 0:
