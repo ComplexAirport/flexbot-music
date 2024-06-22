@@ -31,7 +31,13 @@ async def on_disconnect():
 
 
 class MusicPlayerView(discord.ui.View):
-    default_volume_change: int = 20
+    default_volume_change: int = 25
+
+    __is_paused: bool = False  # Used for toggling music
+    __last_volume: int | None = None  # Used for toggling mute button
+
+    def __init__(self):
+        super().__init__(timeout=None)
 
     @staticmethod  # This function turns plain string into an embed to display in messages
     def get_embed(text: str) -> discord.Embed:
@@ -41,33 +47,42 @@ class MusicPlayerView(discord.ui.View):
     async def stop_callback(self, _: discord.Button, interaction: discord.Interaction):
         if not music_handler.is_active():
             await interaction.edit(embed=MusicPlayerView.get_embed('There is no music to stop'))
+        elif not await music_handler.check_valid_interaction(interaction):
+            return
+        
         else:
             music_handler.request_clear()
             await interaction.edit(embed=music_handler.get_queue_status())
             await music_handler.update_state()
 
     @discord.ui.button(label="Pause", style=discord.ButtonStyle.primary, emoji="⏸️", row=0)
-    async def pause_callback(self, _: discord.Button, interaction: discord.Interaction):
+    async def pause_resume_callback(self, button: discord.Button, interaction: discord.Interaction):
         if not music_handler.is_active():
-            await interaction.edit(embed=MusicPlayerView.get_embed('There is no music to pause'))
+            return await interaction.edit(embed=MusicPlayerView.get_embed('There is no music to pause'))
+        elif not await music_handler.check_valid_interaction(interaction):
+            return
+
+        if MusicPlayerView.__is_paused:
+            music_handler.request_resume()
+            button.label = 'Pause'
+            button.emoji = '⏸️'
+            MusicPlayerView.__is_paused = False
         else:
             music_handler.request_pause()
-            await interaction.edit(embed=music_handler.get_queue_status())
-            await music_handler.update_state()
+            button.label = 'Resume'
+            button.emoji = '▶️'
+            MusicPlayerView.__is_paused = True
 
-    @discord.ui.button(label="Resume", style=discord.ButtonStyle.primary, emoji="▶️", row=0)
-    async def resume_callback(self, _: discord.Button, interaction: discord.Interaction):
-        if not music_handler.is_active():
-            await interaction.edit(embed=MusicPlayerView.get_embed('There is no music to resume'))
-        else:
-            music_handler.request_resume()
-            await interaction.edit(embed=music_handler.get_queue_status())
-            await music_handler.update_state()
+        await interaction.edit(embed=music_handler.get_queue_status(), view=self)
+        await music_handler.update_state()
 
     @discord.ui.button(label="Skip", style=discord.ButtonStyle.green, emoji="⏩", row=0)
     async def skip_callback(self, _: discord.Button, interaction: discord.Interaction):
         if not music_handler.is_active():
             await interaction.edit(embed=MusicPlayerView.get_embed('There is no music to skip'))
+        elif not await music_handler.check_valid_interaction(interaction):
+            return
+        
         else:
             music_handler.request_skip()
             state = MusicHandler.State.EMPTY if music_handler.get_queue_size() == 0 else MusicHandler.State.PLAYING
@@ -77,6 +92,9 @@ class MusicPlayerView(discord.ui.View):
     # Sets the volume default_volume_change% higher
     @discord.ui.button(label="Volume Up", style=discord.ButtonStyle.green, emoji="🔊", row=1)
     async def volume_up_callback(self, _: discord.Button, interaction: discord.Interaction):
+        if not await music_handler.check_valid_interaction(interaction):
+            return
+        
         set_vol = music_handler.get_volume() + MusicPlayerView.default_volume_change
         music_handler.request_set_volume(set_vol)
         await interaction.edit(embed=music_handler.get_queue_status())
@@ -85,23 +103,40 @@ class MusicPlayerView(discord.ui.View):
     # Sets the volume default_volume_change% lower
     @discord.ui.button(label="Volume Down", style=discord.ButtonStyle.green, emoji="🔉", row=1)
     async def volume_down_callback(self, _: discord.Button, interaction: discord.Interaction):
+        if not await music_handler.check_valid_interaction(interaction):
+            return
+        
         set_vol = max(0, music_handler.get_volume() - MusicPlayerView.default_volume_change)
         music_handler.request_set_volume(set_vol)
         await interaction.edit(embed=music_handler.get_queue_status())
         await music_handler.update_state()
 
-    # Sets the volume to 0%
-    @discord.ui.button(label="Mute", style=discord.ButtonStyle.green, emoji="🔇", row=1)
-    async def mute_callback(self, _: discord.Button, interaction: discord.Interaction):
-        music_handler.request_set_volume(0)
-        await interaction.edit(embed=music_handler.get_queue_status())
-        await music_handler.update_state()
+    @discord.ui.button(label="Mute", style=discord.ButtonStyle.green, emoji="🔈", row=1)
+    async def mute_unmute_callback(self, button: discord.Button, interaction: discord.Interaction):
+        if not await music_handler.check_valid_interaction(interaction):
+            return
+        
+        if MusicPlayerView.__last_volume is not None:
+            vol = MusicPlayerView.__last_volume if MusicPlayerView.__last_volume != 0 \
+                else MusicPlayerView.default_volume_change
+            music_handler.request_set_volume(vol)
+            MusicPlayerView.__last_volume = None
+            button.label = 'Mute'
+            button.emoji = '🔈'
+        else:
+            MusicPlayerView.__last_volume = music_handler.get_volume()
+            music_handler.request_set_volume(0)
+            button.label = 'Unmute'
+            button.emoji = '🔇'
 
-    @discord.ui.button(label="Show status", style=discord.ButtonStyle.secondary, emoji="❔", row=1)
-    async def show_status_callback(self, _: discord.Button, interaction: discord.Interaction):
-        ctx = await bot.get_application_context(interaction=interaction)
-        music_handler.music_player_contexts.append(ctx)
-        await interaction.edit(embed=music_handler.get_queue_status())
+        await music_handler.update_state()
+        await interaction.edit(embed=music_handler.get_queue_status(), view=self)
+
+    # This function is used to remember last set volume, so that when muting and then unmuting
+    # bot will set volume to the last set one
+    @staticmethod
+    def set_last_volume(vol: int):
+        MusicPlayerView.__last_volume = vol
 
 
 @bot.slash_command(guild_ids=GUILD_IDS, description='Play a song immediately, without queue.')
@@ -148,6 +183,8 @@ async def queue(ctx: discord.ApplicationContext, link: discord.Option(str, descr
 async def skip(ctx: discord.ApplicationContext):
     if not music_handler.is_active():
         await ctx.respond(embed=MusicPlayerView.get_embed('There is no music to skip!'))
+    elif not music_handler.check_valid_interaction(ctx):
+        return
     else:
         await ctx.respond(embed=MusicPlayerView.get_embed('Skipped to the next song'))
         music_handler.request_skip()
@@ -158,6 +195,8 @@ async def skip(ctx: discord.ApplicationContext):
 async def pause(ctx: discord.ApplicationContext):
     if not music_handler.is_active():
         await ctx.respond(embed=MusicPlayerView.get_embed('There is no music to pause!'))
+    elif not music_handler.check_valid_interaction(ctx):
+        return
     else:
         await ctx.respond(embed=MusicPlayerView.get_embed('Paused the music'))
         music_handler.request_pause()
@@ -168,6 +207,8 @@ async def pause(ctx: discord.ApplicationContext):
 async def resume(ctx: discord.ApplicationContext):
     if not music_handler.is_active():
         await ctx.respond(embed=MusicPlayerView.get_embed('There is no paused music to resume!'))
+    elif not music_handler.check_valid_interaction(ctx):
+        return
     else:
         await ctx.respond(embed=MusicPlayerView.get_embed('Resumed the music'))
         music_handler.request_resume()
@@ -178,6 +219,8 @@ async def resume(ctx: discord.ApplicationContext):
 async def clear(ctx: discord.ApplicationContext):
     if not music_handler.is_active():
         await ctx.respond(embed=MusicPlayerView.get_embed('There is no queue to clear!'))
+    elif not music_handler.check_valid_interaction(ctx):
+        return
     else:
         await ctx.respond(embed=MusicPlayerView.get_embed('Cleared the queue'))
         music_handler.request_clear()
@@ -187,8 +230,11 @@ async def clear(ctx: discord.ApplicationContext):
 async def volume(ctx: discord.ApplicationContext, vol: discord.Option(int, description='in percents %')):
     if vol < 0:
         await ctx.respond(embed=MusicPlayerView.get_embed('Percentage cannot be negative!'))
+    elif not music_handler.check_valid_interaction(ctx):
+        return
     else:
         await ctx.respond(embed=MusicPlayerView.get_embed(f'Set the volume to {vol}%'))
+        MusicPlayerView.set_last_volume(vol)
         music_handler.request_set_volume(vol)
         await music_handler.update_state()
 
@@ -198,6 +244,8 @@ async def jump(ctx: discord.ApplicationContext, n: discord.Option(int, descripti
     queue_size = music_handler.get_queue_size()
     if queue_size == 0:
         await ctx.respond(embed=MusicPlayerView.get_embed('There are no items in the queue!'))
+    elif not music_handler.check_valid_interaction(ctx):
+        return
     elif n > queue_size:
         await ctx.respond(embed=MusicPlayerView.get_embed(f'There are only {queue_size} items in the queue!'))
     elif n <= 0:
@@ -213,6 +261,8 @@ async def remove(ctx: discord.ApplicationContext, n: discord.Option(int, descrip
     queue_size = music_handler.get_queue_size()
     if queue_size == 0:
         await ctx.respond(embed=MusicPlayerView.get_embed('There are no items in the queue!'))
+    elif not music_handler.check_valid_interaction(ctx):
+        return
     elif n > queue_size:
         await ctx.respond(embed=MusicPlayerView.get_embed(f'There are only {queue_size} items in the queue!'))
     elif n <= 0:
@@ -239,11 +289,5 @@ async def status(ctx: discord.ApplicationContext):
 async def help(ctx: discord.ApplicationContext):
     await ctx.respond(HELP_MESSAGE)
 
-bot.run(TOKEN)
 
-'''
-TODO
-1) Turn Show status button into a toggle button
-2) Make the Mute button toggle and remember last volume
-3) Make the pause and resum buttons the same (toggle)
-'''
+bot.run(TOKEN)

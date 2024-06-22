@@ -18,5 +18,6 @@ LOGO_PATH = config['logo']
 
 # Set up logger
 log = logging.getLogger('rich')
-log.setLevel(level=logging.INFO)
+log.setLevel(level=logging.DEBUG)
 log.addHandler(RichHandler())
+
