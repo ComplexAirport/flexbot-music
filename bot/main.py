@@ -160,7 +160,7 @@ class VideoSelectView(discord.ui.View):
 
 
 # Basic autocomplete, returns youtube video options
-async def search_autocomplete(ctx: discord.AutocompleteContext) -> list[discord.OptionChoice]:
+async def play_autocomplete(ctx: discord.AutocompleteContext) -> list[discord.OptionChoice]:
     AUTOCOMPLETE_LENGTH = 5
     res = Search.get_title_urls(ctx.value)
     res = list(islice(res, AUTOCOMPLETE_LENGTH))
@@ -170,7 +170,7 @@ async def search_autocomplete(ctx: discord.AutocompleteContext) -> list[discord.
 @bot.slash_command(guild_ids=GUILD_IDS, description='Play a song immediately, without queue.')
 async def play(ctx: discord.ApplicationContext,
                query: discord.Option(str, description='Search phrase or YouTube link',
-                                     autocomplete=search_autocomplete)):
+                                     autocomplete=play_autocomplete)):
     await ctx.response.defer()
     # If author of the message isn't in any voice channel
     if ctx.author.voice is None:
@@ -182,9 +182,9 @@ async def play(ctx: discord.ApplicationContext,
 
     # If this context's channel didn't have music a player
     if music_player == ctx:
-        await ctx.respond(view=MusicPlayerView())
+        await ctx.followup.send(view=MusicPlayerView())
     else:
-        await ctx.respond(embed=MusicPlayerView.get_embed('Your music will start playing shortly'))
+        await ctx.followup.send(embed=MusicPlayerView.get_embed('Your music will start playing shortly'))
 
     # Request the music
     return await music_handler.request_music(ctx=ctx, query=query, add_to_queue=False)
@@ -193,7 +193,7 @@ async def play(ctx: discord.ApplicationContext,
 @bot.slash_command(guild_ids=GUILD_IDS, description='Add a song to the queue.')
 async def queue(ctx: discord.ApplicationContext,
                 query: discord.Option(str, description='Search phrase or YouTube link',
-                                      autocomplete=search_autocomplete)):
+                                      autocomplete=play_autocomplete)):
     await ctx.response.defer()
     # If author of the message isn't in any voice channel
     if ctx.author.voice is None:
@@ -215,10 +215,7 @@ async def queue(ctx: discord.ApplicationContext,
 
 # Search and get detailed list of videos
 @bot.slash_command(guild_ids=GUILD_IDS, description='Search YouTube.')
-async def search(ctx: discord.ApplicationContext,
-                 query: discord.Option(str, description='Search for',
-                                       autocomplete=search_autocomplete,
-                                       )):
+async def search(ctx: discord.ApplicationContext, query: discord.Option(str, description='Search for')):
     await ctx.response.defer()
     videos = Search.get_all_details(query)
     view = VideoSelectView(videos)

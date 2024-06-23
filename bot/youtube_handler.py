@@ -38,19 +38,27 @@ class YoutubeObject:
 class Search:
     @staticmethod
     def get_urls(query: str) -> list[str]:
+        if not query.strip() or len(query) < 3:
+            return []
         log.info(f'Searching youtube\nquery={query}')
         search = pytube.Search(query)
         return [video.watch_url for video in search.results]
 
     @staticmethod
     def get_title_urls(query: str) -> list[tuple[str, str]]:
+        if not query.strip() or len(query) < 3:
+            return []
         log.info(f'Searching youtube\nquery={query}')
         search = pytube.Search(query)
-        return [(video.title, video.watch_url) for video in search.results]
+        res = [(video.title, video.watch_url) for video in search.results]
+        log.info('Got results')
+        return res
 
     # Returns a list of (title, author, views, url)
     @staticmethod
     def get_all_details(query: str) -> list[tuple[str, str, int, str]]:
+        if not query.strip() or len(query) < 3:
+            return []
         log.info(f'Searching youtube\nquery={query}')
         search = pytube.Search(query)
         return [(video.title, video.author, video.views, video.watch_url) for video in search.results]
