@@ -24,7 +24,7 @@ setup_traceback()
 
 
 class MusicHandler:
-    State = Enum('State', ['EMPTY', 'PAUSED', 'PLAYING'])
+    State = Enum('State', ['EMPTY', 'PAUSED', 'PLAYING', 'PROCESSING', 'DOWNLOADING'])
 
     def __init__(self, bot: discord.Bot):
         self.vc: discord.VoiceClient | None = None
@@ -46,6 +46,7 @@ class MusicHandler:
         # Flags required for the __music_task
         self.__is_active: bool = False  # Used in methods to check whether __music_task is running
         self.__request_skip: bool = False  # Used to skip playing current song in the __music_task if set to True
+
         self.__start_time: float = time.time()  # Used for tracking video progress
         self.__pause_time: float | None = None  # Used for pausing progress when pausing audio
 
@@ -70,6 +71,8 @@ class MusicHandler:
             log.info(f'Downloading the video...\n\t'
                      f'from={yt.youtube.watch_url}\n\t'
                      f'to={stream.default_filename}')
+
+            await self.update_state(MusicHandler.State.DOWNLOADING)
 
             video_path = Path(stream.download(output_path=OUTPUT_PATH))
 
@@ -127,12 +130,12 @@ class MusicHandler:
             log.info(f'Disconnecting from \'{self.vc.channel.name}\'...')
             await self.vc.disconnect()
 
-    async def request_music(self, ctx: discord.ApplicationContext, link: str, add_to_queue: bool):
+    async def request_music(self, ctx: discord.ApplicationContext, query: str, add_to_queue: bool):
         log.debug('Music Handler request\n\t'
                   f'queue={add_to_queue}\n\t'
-                  f'link={link}')
+                  f'link={query}')
 
-        youtube = YoutubeObject(link)
+        youtube = YoutubeObject(query)
 
         if youtube.error:
             return await ctx.respond(youtube.error)
@@ -220,7 +223,6 @@ class MusicHandler:
                 await ctx.edit(embed=self.get_queue_status(state=state))
             except NotFound:  # For example, the message was deleted
                 log.warn(f'Possible Music Player message/channel removal')
-                log.warn(f'Removing {ctx.channel.name} from music player list')
                 self.music_player_contexts.remove(ctx)
 
     # Information functions
@@ -250,6 +252,11 @@ class MusicHandler:
                     status = 'Playing'
                 case MusicHandler.State.PAUSED:
                     status = 'Paused'
+                case MusicHandler.State.PROCESSING:
+                    status = 'Processing'
+                case MusicHandler.State.DOWNLOADING:
+                    status = 'Downloading'
+
         elif self.vc is None or not self.__is_active:
             status = 'Empty'
         elif self.vc.is_playing():
@@ -285,6 +292,9 @@ class MusicHandler:
             embed.add_field(name=name, value=value, inline=False)
 
         for idx, m in enumerate(self.queue):
+            if idx == 6:
+                embed.add_field(name='...', value='', inline=True)
+                break
             name, value = MusicHandler.format_queued_song(m[2], self.bot.get_channel(m[1]).name, idx + 1)
             embed.add_field(name=name, value=value, inline=True)
 

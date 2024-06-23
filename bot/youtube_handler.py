@@ -4,17 +4,20 @@ from init import log
 
 
 class YoutubeObject:
-    def __init__(self, url: str):
+    def __init__(self, query: str):
         self.error: str | None = None
         try:
             # Query for the video at the link, then get the audio only
-            log.info(f'Querying youtube link={url}')
-            self.youtube: pytube.YouTube = pytube.YouTube(url=url)
+            log.info(f'Querying youtube link={query}')
+            self.youtube: pytube.YouTube = pytube.YouTube(url=query)
             log.info('Query successful')
-        # Video couldn't be found error (caused py pytube.Youtube())
+        # If the 'query' wasn't a valid url, search for it in YouTube and get the first video
         except RegexMatchError:
-            log.error('Query unsuccessful, video not found')
-            self.error = 'Sorry, I could\'t find the video at the specified url.'
+            search = Search.get_urls(query)
+            if len(search) == 0:
+                self.error = 'Sorry, I could\'t find the video at the specified url.'
+            else:
+                self.youtube: pytube.YouTube = pytube.YouTube(url=search[0])
         # Video cannot be queried because of age restriction
         except AgeRestrictedError:
             log.error('Query unsuccessful, age restriction error')
@@ -32,14 +35,22 @@ class YoutubeObject:
         return stream
 
 
-# Todo
-def search_youtube(query: str, result_count: int = 10):
-    search = pytube.Search(query)
+class Search:
+    @staticmethod
+    def get_urls(query: str) -> list[str]:
+        log.info(f'Searching youtube\nquery={query}')
+        search = pytube.Search(query)
+        return [video.watch_url for video in search.results]
 
-    log.debug(f'Searching youtube\nquery={query}')
+    @staticmethod
+    def get_title_urls(query: str) -> list[tuple[str, str]]:
+        log.info(f'Searching youtube\nquery={query}')
+        search = pytube.Search(query)
+        return [(video.title, video.watch_url) for video in search.results]
 
-    while len(search.results) < result_count:
-        search.get_next_results()
-
-    results: list[pytube.YouTube] = search.results[:result_count]
-    return [(video.title, video.watch_url) for video in results]
+    # Returns a list of (title, author, views, url)
+    @staticmethod
+    def get_all_details(query: str) -> list[tuple[str, str, int, str]]:
+        log.info(f'Searching youtube\nquery={query}')
+        search = pytube.Search(query)
+        return [(video.title, video.author, video.views, video.watch_url) for video in search.results]
