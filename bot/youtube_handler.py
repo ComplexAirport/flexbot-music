@@ -1,6 +1,8 @@
 import pytube  # For downloading videos from YouTube
 from pytube.exceptions import RegexMatchError, AgeRestrictedError  # For YouTube error handling
-from init import log
+from init import log, setup_traceback
+
+setup_traceback()
 
 
 class YoutubeObject:

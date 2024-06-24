@@ -161,6 +161,7 @@ class VideoSelectView(discord.ui.View):
 
 # Basic autocomplete, returns youtube video options
 async def play_autocomplete(ctx: discord.AutocompleteContext) -> list[discord.OptionChoice]:
+    await ctx.interaction.response.defer()
     AUTOCOMPLETE_LENGTH = 5
     res = Search.get_title_urls(ctx.value)
     res = list(islice(res, AUTOCOMPLETE_LENGTH))
@@ -286,7 +287,7 @@ async def volume(ctx: discord.ApplicationContext, vol: discord.Option(int, descr
         await music_handler.update_state()
 
 
-async def jump_remove_autocomplete(ctx: discord.AutocompleteContext) -> list[discord.OptionChoice]:
+async def jump_remove_autocomplete(_: discord.AutocompleteContext) -> list[discord.OptionChoice]:
     return [discord.OptionChoice(name=f'{idx + 1}) {vid[2].youtube.title}',
                                  value=idx + 1) for idx, vid in enumerate(music_handler.queue)]
 
