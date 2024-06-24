@@ -1,29 +1,30 @@
 # This file is used to request music playing operations, like requesting music, stopping it, changing volume,
 # Interacting with queue, etc.
 
-import discord
-from discord.errors import NotFound
-from init import log, setup_traceback  # For debugging
+import discord  # py-cord - Python Discord Library
+from discord.errors import NotFound  # Message not found error (for example)
+from init import log, setup_traceback  # For debugging purposes
 from youtube_handler import YoutubeObject  # For YouTube requests
 
-from asyncio import sleep  # For music playing
-import time
+from asyncio import sleep
+import time  # For time tracking features
 
-# For storing queue Data
-from collections import deque
+from collections import deque  # For storing music
 from pathlib import Path
-from init import OUTPUT_PATH
+from init import OUTPUT_PATH  # Where the music is downloaded
 from enum import Enum  # For tracking music player state
 
-# This line of code fixes AgeRestrictionError when downloading non age-restricted videos
+# Fixes pytube AgeRestrictionError bug when downloading non age-restricted videos
 from pytube.innertube import _default_clients
 
 _default_clients["ANDROID_MUSIC"] = _default_clients["ANDROID_CREATOR"]
 
+# Setup beautiful traceback provided by rich library
 setup_traceback()
 
 
 class MusicHandler:
+    # Possible states of the music player
     State = Enum('State', ['EMPTY', 'PAUSED', 'PLAYING', 'PROCESSING', 'DOWNLOADING'])
 
     def __init__(self, bot: discord.Bot):
@@ -37,52 +38,58 @@ class MusicHandler:
         """
         List that keeps contexts of all music players.
         The purpose of this list is to let the bot update all the music player embeds
-        in all channels when the song changes. It's also used not to let bot send music player
-        to the same channel twice (of not requested with /controls)
-        see the slash commands play and queue for above usage
+        in all channels when the song state (for example, volume) changes. 
+        It's also used not to let bot send music player to the same channel twice (if not requested with /controls)
+        see the slash commands /play and /queue for usage mentioned above
         """
         self.music_player_contexts: list[discord.ApplicationContext] = []
 
-        # Flags required for the __music_task
-        self.__is_active: bool = False  # Used in methods to check whether __music_task is running
-        self.__request_skip: bool = False  # Used to skip playing current song in the __music_task if set to True
+        self.__is_active: bool = False  # Used check whether __music_task is running
+        self.__request_skip: bool = False  # Skips current song (see __music_task) if set to True
 
-        self.__start_time: float = time.time()  # Used for tracking video progress
-        self.__pause_time: float | None = None  # Used for pausing progress when pausing audio
+        self.__start_time: float = time.time()  # Used to track video progress
+        self.__pause_time: float | None = None  # Used to pause progress when pausing audio
 
-        # Other useful variables
-        self.__volume: int = 1  # Keep volume for all songs
-        self.now_playing: YoutubeObject | None = None  # Name of the song currently playing
+        self.__volume: int = 1  # Keep current volume
+        self.now_playing: YoutubeObject | None = None  # Store currently playing song
 
-    # Creates a recursive music playing task
+    # Loops and plays every song from the queue
     async def __music_task(self):
         self.__is_active = True
 
         while len(self.queue) > 0:
-            # Get the first element in the queue
+            # Pop first element in the queue and get it's data
             channel, channel_id, yt = self.queue.popleft()
             channel_name = self.bot.get_channel(channel_id).name
+
             log.info(f'Target channel {channel_name}\n\t'
                      f'id={channel_id}')
 
-            # Download the video
             self.now_playing = yt
+
+            # Get the video stream
             stream = yt.get_stream()
+
+            # Update current player state to DOWNLOADING
+            await self.update_state(MusicHandler.State.DOWNLOADING)
+
             log.info(f'Downloading the video...\n\t'
                      f'from={yt.youtube.watch_url}\n\t'
                      f'to={stream.default_filename}')
 
-            await self.update_state(MusicHandler.State.DOWNLOADING)
-
+            # Download the audio
             video_path = Path(stream.download(output_path=OUTPUT_PATH))
 
             # If the voice client does not exist or isn't connected to the channel, connect
             if self.vc is None or not self.vc.is_connected():
                 log.info(f'Connecting to \'{channel_name}\'...')
+
                 self.vc = await self.bot.get_channel(channel_id).connect()
+
             # If the bot is in some channel but not the right one, move to it
             else:
                 log.info(f'Moving to \'{channel_name}\'...')
+
                 await self.vc.move_to(self.bot.get_channel(channel_id))
                 await sleep(1)  # Wait for 1 second to ensure the voice client is connected
 
@@ -91,26 +98,37 @@ class MusicHandler:
             source = discord.PCMVolumeTransformer(discord.FFmpegPCMAudio(str(video_path.resolve())),
                                                   volume=self.__volume)
 
-            # Update the status of all music players, set state to playing
+            # Update current player state to PLAYING
             await self.update_state(MusicHandler.State.PLAYING)
 
-            # Play the audio from source in the voice channel
             log.info(f'Playing the audio in the channel \'{channel_name}\'...')
+
+            # Play the audio from source in the voice channel
             self.vc.play(source, after=lambda err: log.error(err) if err else None)
+
+            # Store playing start time
             self.__start_time = time.time()
 
-            # Loop which waits til the audio is over
+            # Loop which waits until the audio is over
             while self.vc.is_playing() or self.vc.is_paused():
+                # If a skip is requested, break immediately
                 if self.__request_skip:
                     log.debug('Terminating current loop...')
                     self.__request_skip = False
                     break
+
+                # Update current state (usually only the time updates)
                 await self.update_state()
                 await sleep(1)
 
             log.info('The playing loop has finished.')
+
+            # Stop playing
             self.vc.stop()
+
             log.info(f'Removing the temporary file {video_path.resolve()} ...')
+
+            # Remove the locally saved audio file
             try:
                 await sleep(1)  # Wait a bit before removing not to cause PermissionError
                 video_path.unlink()
@@ -122,107 +140,130 @@ class MusicHandler:
         self.__start_time = time.time()
         self.__pause_time = None
 
-        # Update the status of all music players, set state to empty (the queue is empty)
+        # Update the status of all music players, set state to EMPTY (the queue is empty)
         await self.update_state(MusicHandler.State.EMPTY)
 
+        # If voice client is still in a channel, disconnect
         if self.vc:
-            # Disconnect from the last voice channel
             log.info(f'Disconnecting from \'{self.vc.channel.name}\'...')
+
             await self.vc.disconnect()
 
+    # Request play of a music
     async def request_music(self, ctx: discord.ApplicationContext, query: str, add_to_queue: bool):
         log.debug('Music Handler request\n\t'
                   f'queue={add_to_queue}\n\t'
-                  f'link={query}')
+                  f'query={query}')
 
+        # Get the YouTube object
         youtube = YoutubeObject(query)
 
         if youtube.error:
             return await ctx.respond(youtube.error)
 
-        # If music is requested in queue mode
+        log.info(f'Music request add_to_queue={add_to_queue}\nQueue size={len(self.queue)}')
+
+        # If /queue is used, song will be added to the end of the queue
         if add_to_queue:
             self.queue.append((ctx, ctx.author.voice.channel.id, youtube))
-            log.info('Added request to the end of the queue')
-            log.info(f'Queue size={len(self.queue)}')
-            if not self.__is_active:
-                log.debug('Calling self.__music_task()')
-                await self.__music_task()
-            else:
-                await self.update_state()
 
+        # if /play is used, song will be added to the beginning of the queue (and skip will be requested)
         else:
             self.queue.appendleft((ctx, ctx.author.voice.channel.id, youtube))
-            log.info('Add request to beginning of the queue')
-            log.info(f'Queue size={len(self.queue)}')
-            if self.__is_active:
-                self.request_skip()
-            else:
-                log.debug('Calling self.__music_task()')
-                await self.__music_task()
+
+        # If __music_task is not active, call it
+        if not self.__is_active:
+            log.debug('Calling self.__music_task()')
+            await self.__music_task()
+
+        # If a song is playing, and no queueing is requested
+        # skip it so that the next song playing will be requested one
+        elif not add_to_queue:
+            self.request_skip()
 
     def request_skip(self):
         log.debug('Skip requested')
-        if self.get_queue_size() == 1:
-            self.now_playing = self.queue[0][2]
-        else:
-            self.now_playing = None
+
+        # With self.__request_skip=True, playing loop in self.__music_task will terminate
         self.__request_skip = True
         time.sleep(1)
 
     def request_pause(self):
         log.debug('Pause requested')
         self.vc.pause()
+
+        # Store the time of pause (for proper audio progress display)
         self.__pause_time = time.time()
 
     def request_resume(self):
         log.debug('Resume requested')
         if self.vc.is_paused():
             self.vc.resume()
+
+            # Add the duration of pause to starting time for proper audio progress display
             self.__start_time += time.time() - self.__pause_time
+
             self.__pause_time = None
 
     def request_clear(self):
         log.debug('Clear requested')
+
+        # Clear the queue
         self.queue.clear()
+
+        # Skip current song
         self.request_skip()
 
     def request_set_volume(self, vol: int):
         vol /= 100
+
         log.debug(f'Volume change requested from={self.__volume} to={vol}')
+
         if self.vc and self.vc.source:
             self.vc.source.volume = vol
+
         self.__volume = vol
 
     def request_remove(self, idx: int):
         log.debug(f'Request removal at queue[{idx}]')
+
         del self.queue[idx]
 
     def request_jump(self, idx: int):
         log.debug(f'Jump requested to queue[{idx}]')
-        # Slice the deque (ordinary slicing with [:] is not possible)
+
+        # Slice the deque (slicing with [:] is not possible)
         for _ in range(idx):
             self.queue.popleft()
         self.request_skip()
 
+    """
+    If there is a music player in the channel of ctx already, this function will return the context of that music player
+    If not, it will be added to the list of music player contexts and be returned
+    """
     def get_music_player_from_context(self, ctx: discord.ApplicationContext) -> discord.ApplicationContext:
-        """
-        If there is a music player in the channel of ctx already, it will return the context of that music player.
-        If not, it will be added to the list of music player contexts and be returned
-        """
+        # Get context of player in this channel (or None)
         player_ctx = next((c for c in self.music_player_contexts if c.channel == ctx.channel), None)
+
+        # If there isn't a music player in this context, add this context to music players
+        # The music player will be sent from slash commands
         if player_ctx is None:
             self.music_player_contexts.append(ctx)
             return ctx
+
+        # Else return the music player of this context
         else:
             return player_ctx
 
+    # Update the state of the music player
     async def update_state(self, state: State | None = None):
         for ctx in self.music_player_contexts:
             try:
                 await ctx.edit(embed=self.get_queue_status(state=state))
+
             except NotFound:  # For example, the message was deleted
                 log.warn(f'Possible Music Player message/channel removal')
+
                 self.music_player_contexts.remove(ctx)
 
     # Information functions
@@ -242,7 +283,6 @@ class MusicHandler:
             return self.vc.channel
 
     # Get discord.Embed with currently playing music, queue and other information
-    # argument state
     def get_queue_status(self, state: State | None = None) -> discord.Embed:
         if state is not None:
             match state:

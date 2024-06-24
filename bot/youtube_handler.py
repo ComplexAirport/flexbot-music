@@ -7,7 +7,7 @@ setup_traceback()
 
 class YoutubeObject:
     def __init__(self, query: str):
-        self.error: str | None = None
+        self.error: str | None = None  # None if no error, string (the error message) if there is an error
         try:
             # Query for the video at the link, then get the audio only
             log.info(f'Querying youtube link={query}')
@@ -38,6 +38,7 @@ class YoutubeObject:
 
 
 class Search:
+    # Get list of video urls by search term
     @staticmethod
     def get_urls(query: str) -> list[str]:
         if not query.strip() or len(query) < 3:
@@ -46,6 +47,7 @@ class Search:
         search = pytube.Search(query)
         return [video.watch_url for video in search.results]
 
+    # Get list of video titles and their urls by search term
     @staticmethod
     def get_title_urls(query: str) -> list[tuple[str, str]]:
         if not query.strip() or len(query) < 3:
@@ -56,7 +58,7 @@ class Search:
         log.info('Got results')
         return res
 
-    # Returns a list of (title, author, views, url)
+    # Get list of video titles, authors, views and urls by search term
     @staticmethod
     def get_all_details(query: str) -> list[tuple[str, str, int, str]]:
         if not query.strip() or len(query) < 3:

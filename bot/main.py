@@ -1,29 +1,30 @@
 """
 This file is where the bot is created and launched
-NOTE: For script to work ffmpeg should be installed and added to system PATH
+NOTE: For script to work, ffmpeg should be installed and added to system PATH
 PyNaCl library should also be installed
 """
 
-import discord  # Python Discord API (pycord)
-from init import TOKEN, GUILD_IDS, HELP_MESSAGE, DESCRIPTION, log, setup_traceback  # Configs
-from music_handler import MusicHandler  # For handling music features
-from youtube_handler import Search
-from itertools import islice
+import discord  # py-cord - Python Discord Library
+from init import TOKEN, GUILD_IDS, HELP_MESSAGE, DESCRIPTION, log, setup_traceback  # Get configuration
+from music_handler import MusicHandler  # For handling music
+from youtube_handler import Search  # For searching music
+from itertools import islice  # To slice YouTube search results
 
+# Setup beautiful traceback provided by rich library
 setup_traceback()
 
-# Specify the permissions for bot
+# Specify the intents of the bot
 intents = discord.Intents(members=True, message_content=True, voice_states=True, guilds=True)
 
 # Initialize the bot itself
 bot = discord.Bot(description=DESCRIPTION, intents=intents)
 
-# Initialize the music features handler
+# Initialize the music handler
 music_handler = MusicHandler(bot)
 
 
 @bot.event
-async def on_ready():
+async def on_ready():  # When the bot is launched and ready
     log.info(f'Logged in as {bot.user}')
 
 
@@ -32,16 +33,19 @@ async def on_disconnect():
     pass
 
 
+# This class is the control buttons (play/pause, mute/unmute) View
 class MusicPlayerView(discord.ui.View):
+    # By how much percent will the volume increase/decrease when the buttons are clicked
     default_volume_change: int = 25
 
-    __is_paused: bool = False  # Used for toggling music
-    __last_volume: int | None = None  # Used for toggling mute button
+    __is_paused: bool = False  # Used for pause/play toggling
+    __last_volume: int | None = None  # Used for mute/unmute toggling
 
     def __init__(self):
-        super().__init__(timeout=None)
+        super().__init__(timeout=None)  # So that the buttons never timeout
 
-    @staticmethod  # This function turns plain string into an embed to display in messages
+    # This function turns plain string into an embed to display in messages
+    @staticmethod
     def get_embed(text: str) -> discord.Embed:
         return discord.Embed(title=text, color=discord.Colour.light_gray())
 
@@ -51,7 +55,6 @@ class MusicPlayerView(discord.ui.View):
             await interaction.edit(embed=MusicPlayerView.get_embed('There is no music to stop'))
         elif not await music_handler.check_valid_interaction(interaction):
             return
-
         else:
             music_handler.request_clear()
             await interaction.edit(embed=music_handler.get_queue_status())
@@ -141,7 +144,7 @@ class MusicPlayerView(discord.ui.View):
         MusicPlayerView.__last_volume = vol
 
 
-# This class is used in the /search command
+# This View is used in the /search command to get detailed YouTube search
 class VideoSelectView(discord.ui.View):
     def __init__(self, videos: list[tuple[str, str, int, str]]):  # [ (title, author, views, url), ... ]
         super().__init__()
@@ -159,12 +162,20 @@ class VideoSelectView(discord.ui.View):
             await queue(ctx, link)
 
 
+# Number of results in autocomplete (in /play, /queue)
+AUTOCOMPLETE_LENGTH = 5
+
+
 # Basic autocomplete, returns youtube video options
 async def play_autocomplete(ctx: discord.AutocompleteContext) -> list[discord.OptionChoice]:
     await ctx.interaction.response.defer()
-    AUTOCOMPLETE_LENGTH = 5
+
+    # Only request video titles and their urls
     res = Search.get_title_urls(ctx.value)
+
+    # Leave the first AUTOCOMPLETE_LENGTH results
     res = list(islice(res, AUTOCOMPLETE_LENGTH))
+
     return [discord.OptionChoice(name=video[0], value=video[1]) for video in res]
 
 
@@ -172,18 +183,21 @@ async def play_autocomplete(ctx: discord.AutocompleteContext) -> list[discord.Op
 async def play(ctx: discord.ApplicationContext,
                query: discord.Option(str, description='Search phrase or YouTube link',
                                      autocomplete=play_autocomplete)):
+    # defer the response so that it doesn't timeout
     await ctx.response.defer()
+
     # If author of the message isn't in any voice channel
     if ctx.author.voice is None:
-        return await ctx.respond(
-            embed=MusicPlayerView.get_embed('Please join a voice channel so I can play music there!'))
+        return await ctx.respond(embed=MusicPlayerView.get_embed(
+            'Please join a voice channel so I can play music there!'))
 
-    # Get the music player
+    # Get the music player of the current channel
     music_player: discord.ApplicationContext = music_handler.get_music_player_from_context(ctx)
 
-    # If this context's channel didn't have music a player
+    # If this context's channel didn't have music a player, send one
     if music_player == ctx:
         await ctx.followup.send(view=MusicPlayerView())
+    # If it did have a music player, simple display a message
     else:
         await ctx.followup.send(embed=MusicPlayerView.get_embed('Your music will start playing shortly'))
 
@@ -195,20 +209,23 @@ async def play(ctx: discord.ApplicationContext,
 async def queue(ctx: discord.ApplicationContext,
                 query: discord.Option(str, description='Search phrase or YouTube link',
                                       autocomplete=play_autocomplete)):
+    # defer the response so that it doesn't timeout
     await ctx.response.defer()
+
     # If author of the message isn't in any voice channel
     if ctx.author.voice is None:
-        return await ctx.respond(
-            embed=MusicPlayerView.get_embed('Please join a voice channel so I can play music there!'))
+        return await ctx.respond(embed=MusicPlayerView.get_embed(
+            'Please join a voice channel so I can play music there!'))
 
-    # Get the music player
+    # Get the music player of the current channel
     music_player: discord.ApplicationContext = music_handler.get_music_player_from_context(ctx)
 
-    # If this context's channel didn't have music a player
+    # If this context's channel didn't have music a player, send one
     if music_player == ctx:
-        await ctx.respond(view=MusicPlayerView())
+        await ctx.followup.send(view=MusicPlayerView())
+    # If it did have a music player, simple display a message
     else:
-        await ctx.respond(embed=MusicPlayerView.get_embed('Added your music to the queue'))
+        await ctx.followup.send(embed=MusicPlayerView.get_embed('Added your music to the queue'))
 
     # Request the music
     return await music_handler.request_music(ctx=ctx, query=query, add_to_queue=True)
@@ -217,8 +234,12 @@ async def queue(ctx: discord.ApplicationContext,
 # Search and get detailed list of videos
 @bot.slash_command(guild_ids=GUILD_IDS, description='Search YouTube.')
 async def search(ctx: discord.ApplicationContext, query: discord.Option(str, description='Search for')):
+    # defer the response so that it doesn't timeout
     await ctx.response.defer()
+
+    # Get detailed result (title, view, author, url) from YouTube
     videos = Search.get_all_details(query)
+
     view = VideoSelectView(videos)
     await ctx.followup.send(view=view)
 
@@ -229,7 +250,6 @@ async def skip(ctx: discord.ApplicationContext):
         await ctx.respond(embed=MusicPlayerView.get_embed('There is no music to skip!'))
     elif not await music_handler.check_valid_interaction(ctx):
         return
-
     else:
         await ctx.respond(embed=MusicPlayerView.get_embed('Skipped to the next song'))
         music_handler.request_skip()
@@ -241,7 +261,6 @@ async def pause(ctx: discord.ApplicationContext):
         await ctx.respond(embed=MusicPlayerView.get_embed('There is no music to pause!'))
     elif not await music_handler.check_valid_interaction(ctx):
         return
-
     else:
         await ctx.respond(embed=MusicPlayerView.get_embed('Paused the music'))
         music_handler.request_pause()
@@ -254,7 +273,6 @@ async def resume(ctx: discord.ApplicationContext):
         await ctx.respond(embed=MusicPlayerView.get_embed('There is no paused music to resume!'))
     elif not await music_handler.check_valid_interaction(ctx):
         return
-
     else:
         await ctx.respond(embed=MusicPlayerView.get_embed('Resumed the music'))
         music_handler.request_resume()
@@ -267,7 +285,6 @@ async def clear(ctx: discord.ApplicationContext):
         await ctx.respond(embed=MusicPlayerView.get_embed('There is no queue to clear!'))
     elif not await music_handler.check_valid_interaction(ctx):
         return
-
     else:
         await ctx.respond(embed=MusicPlayerView.get_embed('Cleared the queue'))
         music_handler.request_clear()
@@ -279,14 +296,15 @@ async def volume(ctx: discord.ApplicationContext, vol: discord.Option(int, descr
         await ctx.respond(embed=MusicPlayerView.get_embed('Percentage cannot be negative!'))
     elif not await music_handler.check_valid_interaction(ctx):
         return
-
     else:
         await ctx.respond(embed=MusicPlayerView.get_embed(f'Set the volume to {vol}%'))
+        # Remember current volume
         MusicPlayerView.set_last_volume(vol)
         music_handler.request_set_volume(vol)
         await music_handler.update_state()
 
 
+# Autocomplete for jumping/removing from queue
 async def jump_remove_autocomplete(_: discord.AutocompleteContext) -> list[discord.OptionChoice]:
     return [discord.OptionChoice(name=f'{idx + 1}) {vid[2].youtube.title}',
                                  value=idx + 1) for idx, vid in enumerate(music_handler.queue)]
@@ -300,7 +318,6 @@ async def jump(ctx: discord.ApplicationContext, n: discord.Option(int, descripti
         await ctx.respond(embed=MusicPlayerView.get_embed('There are no items in the queue!'))
     elif not await music_handler.check_valid_interaction(ctx):
         return
-
     elif n > queue_size:
         await ctx.respond(embed=MusicPlayerView.get_embed(f'There are only {queue_size} items in the queue!'))
     elif n <= 0:
@@ -319,7 +336,6 @@ async def remove(ctx: discord.ApplicationContext, n: discord.Option(int, descrip
         await ctx.respond(embed=MusicPlayerView.get_embed('There are no items in the queue!'))
     elif not await music_handler.check_valid_interaction(ctx):
         return
-
     elif n > queue_size:
         await ctx.respond(embed=MusicPlayerView.get_embed(f'There are only {queue_size} items in the queue!'))
     elif n <= 0:
@@ -330,15 +346,23 @@ async def remove(ctx: discord.ApplicationContext, n: discord.Option(int, descrip
     await music_handler.update_state()
 
 
+# Get music player buttons
+# (removes previous players)
 @bot.slash_command(guild_ids=GUILD_IDS, description='Display music controls')
 async def controls(ctx: discord.ApplicationContext):
+    # Remove previous music players from the updating list
     for c in music_handler.music_player_contexts:
         if c.channel == ctx.channel:
             await c.delete()
+
+    # Add this music player to updating list
     music_handler.music_player_contexts.append(ctx)
+
+    # Return the player
     await ctx.respond(view=MusicPlayerView(), embed=music_handler.get_queue_status())
 
 
+# Get queue and song info without the buttons
 @bot.slash_command(guild_ids=GUILD_IDS)
 async def status(ctx: discord.ApplicationContext):
     music_handler.music_player_contexts.append(ctx)
